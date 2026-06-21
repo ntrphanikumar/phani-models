@@ -17,6 +17,9 @@ from tokenizer import MoveTokenizer
 # Where to read PGN games from. Override to use an external disk, e.g.:
 #   CHESS_PGN_DIR=/Volumes/HPSSD/phani-chess-data/pgn python train.py
 PGN_DIR = os.environ.get("CHESS_PGN_DIR", "data")
+# Output location for weights/tokenizer (override to keep runs separate):
+#   CHESS_CHECKPOINT_DIR=checkpoints_v2 python train.py
+config.checkpoint_dir = os.environ.get("CHESS_CHECKPOINT_DIR", config.checkpoint_dir)
 TOKENIZER_PATH = os.path.join(config.checkpoint_dir, "tokenizer.json")
 CHECKPOINT_PATH = os.path.join(config.checkpoint_dir, "model.pt")
 

@@ -66,6 +66,12 @@ New to this and wondering what "104M parameters" actually means or how model
 size is calculated? See [docs/model-size-explained.md](docs/model-size-explained.md)
 — a from-scratch, no-jargon walkthrough.
 
+**Resuming work / project status:** see
+[docs/SESSION-HANDOFF-2026-06-21.md](docs/SESSION-HANDOFF-2026-06-21.md) — full
+state (trained models, infra, decisions, next steps). Trained checkpoints are on
+the [Releases page](https://github.com/ntrphanikumar/phani-models/releases)
+(`chess-104m-v1`, `chess-158m-v2`).
+
 ## Run tests
 
 ```bash
