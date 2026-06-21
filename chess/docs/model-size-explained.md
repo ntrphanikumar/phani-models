@@ -71,8 +71,13 @@ The 12 blocks in the middle are where ~82% of the parameters live. Now let's
 count each part.
 
 The key trick for counting a table: **a table of R rows and C columns holds
-R × C numbers.** (A 3-by-4 grid has 12 cells.) That multiplication is 90% of
-the whole calculation.
+R × C numbers.** (A 3-by-5 grid has 15 cells — just like an egg tray.) That
+multiplication is 90% of the whole calculation.
+
+> Heads-up on a confusing coincidence: the number **12** shows up a few times in
+> this project — our model has 12 layers, and (separately) each block works out
+> to "12 tables." Those are unrelated to any example numbers used to explain the
+> math below. When you see 12, check *which* 12 it is.
 
 ### Part 1 — Token embedding (turn each move into numbers)
 
