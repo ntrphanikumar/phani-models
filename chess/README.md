@@ -62,6 +62,10 @@ For real, human-looking play, download a few thousand Lichess games into
 - Stronger: raise them + `max_iters`, and add **more games**.
 - `n_embd` must be divisible by `n_head`.
 
+New to this and wondering what "104M parameters" actually means or how model
+size is calculated? See [docs/model-size-explained.md](docs/model-size-explained.md)
+— a from-scratch, no-jargon walkthrough.
+
 ## Run tests
 
 ```bash
