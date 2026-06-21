@@ -7,12 +7,21 @@ from tokenizer import MoveTokenizer
 
 class DataModule:
     def __init__(self, games, tokenizer: MoveTokenizer, config, train_frac: float = 0.9):
-        self.config = config
         ids: list[int] = []
         for g in games:
             ids.extend(tokenizer.encode(g))
             ids.append(tokenizer.eos_id)  # mark game boundary
-        data = torch.tensor(ids, dtype=torch.long)
+        self._setup(torch.tensor(ids, dtype=torch.long), config, train_frac)
+
+    @classmethod
+    def from_tokens(cls, data: torch.Tensor, config, train_frac: float = 0.9):
+        """Build directly from a prebuilt 1-D token tensor (e.g. a cached stream)."""
+        obj = cls.__new__(cls)
+        obj._setup(data, config, train_frac)
+        return obj
+
+    def _setup(self, data: torch.Tensor, config, train_frac: float):
+        self.config = config
         n = int(train_frac * len(data))
         self.train_data = data[:n]
         self.val_data = data[n:]

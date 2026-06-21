@@ -1,7 +1,10 @@
 """Train the Chess GPT on PGN games in data/. Run: python train.py"""
 
+import math
 import os
+from contextlib import nullcontext
 
+import numpy as np
 import torch
 from tqdm import tqdm
 
@@ -18,6 +21,23 @@ TOKENIZER_PATH = os.path.join(config.checkpoint_dir, "tokenizer.json")
 CHECKPOINT_PATH = os.path.join(config.checkpoint_dir, "model.pt")
 
 
+def amp_context():
+    """Mixed precision (bf16) on CUDA for ~2x speed; no-op elsewhere."""
+    if config.device == "cuda":
+        return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+    return nullcontext()
+
+
+def get_lr(it):
+    """Linear warmup then cosine decay to 10% of the base LR."""
+    warmup = max(100, config.max_iters // 100)
+    min_lr = config.learning_rate * 0.1
+    if it < warmup:
+        return config.learning_rate * (it + 1) / warmup
+    ratio = min(1.0, (it - warmup) / max(1, config.max_iters - warmup))
+    return min_lr + 0.5 * (config.learning_rate - min_lr) * (1 + math.cos(math.pi * ratio))
+
+
 @torch.no_grad()
 def estimate_loss(model, dm):
     out = {}
@@ -26,7 +46,8 @@ def estimate_loss(model, dm):
         losses = torch.zeros(config.eval_iters)
         for k in range(config.eval_iters):
             x, y = dm.get_batch(split)
-            _, loss = model(x, y)
+            with amp_context():
+                _, loss = model(x, y)
             losses[k] = loss.item()
         out[split] = losses.mean().item()
     model.train()
@@ -50,14 +71,27 @@ def main():
         if _v is not None:
             setattr(config, _k, int(_v))
 
-    games = load_games(PGN_DIR, max_games=config.max_games)
-    print(f"loaded {len(games)} games (cap: {config.max_games})")
+    # Fast path: if CHESS_CACHE points at a prebuilt token cache, load it
+    # instantly instead of re-parsing PGN (see build_cache.py).
+    cache_dir = os.environ.get("CHESS_CACHE")
+    cache_tokens = os.path.join(cache_dir, "tokens.npy") if cache_dir else None
+    cache_tok = os.path.join(cache_dir, "tokenizer.json") if cache_dir else None
 
-    tokenizer = MoveTokenizer.from_games(games)
+    if cache_dir and os.path.exists(cache_tokens) and os.path.exists(cache_tok):
+        print(f"loading token cache from {cache_dir} ...")
+        tokenizer = MoveTokenizer.load(cache_tok)
+        ids = np.load(cache_tokens)
+        print(f"cache: {len(ids):,} tokens | vocab {tokenizer.vocab_size}")
+        dm = DataModule.from_tokens(torch.from_numpy(ids).long(), config)
+    else:
+        games = load_games(PGN_DIR, max_games=config.max_games)
+        print(f"loaded {len(games)} games (cap: {config.max_games})")
+        tokenizer = MoveTokenizer.from_games(games)
+        print(f"vocab size: {tokenizer.vocab_size}")
+        dm = DataModule(games, tokenizer, config)
+
+    # Always save the tokenizer next to the checkpoint so play.py can use it.
     tokenizer.save(TOKENIZER_PATH)
-    print(f"vocab size: {tokenizer.vocab_size}")
-
-    dm = DataModule(games, tokenizer, config)
 
     model = GPTLanguageModel(tokenizer.vocab_size, config).to(config.device)
     n_params = sum(p.numel() for p in model.parameters())
@@ -73,18 +107,25 @@ def main():
 
     best_val = float("inf")
     for it in tqdm(range(config.max_iters), desc="training"):
+        lr = get_lr(it)
+        for pg in optimizer.param_groups:
+            pg["lr"] = lr
+
         if it % config.eval_interval == 0 or it == config.max_iters - 1:
             losses = estimate_loss(model, dm)
             tqdm.write(
-                f"step {it}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}"
+                f"step {it}: train loss {losses['train']:.4f}, "
+                f"val loss {losses['val']:.4f}, lr {lr:.2e}"
             )
             # Periodic save so a long run survives a crash; keep the best-val model.
             if losses["val"] < best_val:
                 best_val = losses["val"]
                 save_checkpoint()
                 tqdm.write(f"  saved checkpoint (best val {best_val:.4f})")
+
         x, y = dm.get_batch("train")
-        _, loss = model(x, y)
+        with amp_context():
+            _, loss = model(x, y)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
