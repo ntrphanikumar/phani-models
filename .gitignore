@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# Model artifacts / checkpoints (don't commit weights)
+**/checkpoints/*.pt
+**/checkpoints/*.json
+
+# Large datasets (PGN dumps live on external disk / are downloaded on demand)
+**/data/pgn/*.pgn
+**/data/pgn/*.zst
+**/data/cache/
+
+# OS
+.DS_Store
