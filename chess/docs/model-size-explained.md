@@ -48,6 +48,28 @@ That's the whole nomenclature. Everything below is just arithmetic with these.
 Our chess model ([model.py](../model.py)) has exactly five parts that contain
 parameters. We count each, then add them up.
 
+Here's the whole model as a picture — moves go in at the top, a next-move
+prediction comes out the bottom. The parts in **bold** are the ones holding
+parameters:
+
+```mermaid
+flowchart TB
+    A["Input moves<br/>e4, e5, Nf3, ..."] --> B["1 - Token embedding<br/>(each move -> 768 numbers)"]
+    P["Move positions<br/>1st, 2nd, 3rd, ..."] --> C["2 - Positional embedding<br/>(adds order info)"]
+    B --> D(("+"))
+    C --> D
+    D --> E["3 - Block 1"]
+    E --> F["3 - Block 2"]
+    F --> G["... 10 more blocks ..."]
+    G --> H["3 - Block 12"]
+    H --> I["4 - Final LayerNorm"]
+    I --> J["5 - Output head<br/>(768 numbers -> score per move)"]
+    J --> K["Probability for each<br/>of 12,299 possible moves"]
+```
+
+The 12 blocks in the middle are where ~82% of the parameters live. Now let's
+count each part.
+
 The key trick for counting a table: **a table of R rows and C columns holds
 R × C numbers.** (A 3-by-4 grid has 12 cells.) That multiplication is 90% of
 the whole calculation.
@@ -75,7 +97,33 @@ block_size × n_embd  =  256 × 768  =  196,608 parameters
 
 This is where almost all the parameters live. Each **block** has two machines
 inside, both built from square `n_embd × n_embd` tables (768 × 768 = 589,824
-numbers each). Here's why each block works out to **12 such tables**:
+numbers each). Here's one block as a picture — count the square tables and you
+get 12:
+
+```mermaid
+flowchart TB
+    IN["input (768 numbers per move)"] --> ATT
+    subgraph ATT["Attention — 4 tables"]
+        Q["Query table<br/>768x768"]
+        K["Key table<br/>768x768"]
+        V["Value table<br/>768x768"]
+        O["Combine table<br/>768x768"]
+    end
+    ATT --> ADD1(("+ add back input"))
+    IN --> ADD1
+    ADD1 --> FF
+    subgraph FF["Feed-forward — 8 tables' worth"]
+        EX["Expand 768 -> 3072<br/>(= 4 tables)"]
+        SH["Shrink 3072 -> 768<br/>(= 4 tables)"]
+        EX --> SH
+    end
+    FF --> ADD2(("+ add back"))
+    ADD1 --> ADD2
+    ADD2 --> OUT["output (768 numbers per move)"]
+```
+
+So: **4 (attention) + 8 (feed-forward) = 12 tables of 768×768 per block.**
+Here's why each block works out to **12 such tables**:
 
 **(a) Attention** — lets each move "look at" earlier moves. It needs 4 tables:
 
@@ -142,6 +190,20 @@ bridge between "768 numbers" and "12,299 moves.")
 
 That's **104.13 million** — exactly the number training printed. 🎉
 
+And here's where those parameters actually *live* — notice the 12 blocks dwarf
+everything else (each `█` ≈ 2M parameters):
+
+```
+The 12 blocks   █████████████████████████████████████████  85.0M  (82%)
+Output head     ████▌                                        9.5M   (9%)
+Token embedding ████▌                                        9.4M   (9%)
+Positional emb  ▏                                            0.2M  (~0%)
+Final LayerNorm                                              0.0M  (~0%)
+```
+
+**Takeaway:** if you want to change the model's size, you change the **blocks**.
+Everything else barely moves the needle.
+
 ---
 
 ## 5. The shortcut formula (estimate size in your head)
@@ -172,8 +234,25 @@ Look at the formula and you can see exactly what to turn:
    It's *squared*, so doubling it roughly **quadruples** the model.
    768 → 1536 would take the blocks from ~85M to ~340M.
 
+   ```
+   Why "squared"? A table is width × width, so growing the width grows BOTH sides:
+
+   width 768:   ┌────────┐          width 1536:  ┌────────────────┐
+                │ 768    │                        │ 1536           │
+                │  x     │  = ~0.6M               │   x            │  = ~2.4M
+                │ 768    │  numbers               │ 1536           │  numbers
+                └────────┘                        │                │  (4x bigger!)
+                                                  └────────────────┘
+   ```
+
 2. **`n_layer` (depth) — linear.**
    Doubling layers doubles the block params. 12 → 24 ≈ 170M blocks.
+
+   ```
+   depth 12:  [B][B][B][B][B][B][B][B][B][B][B][B]            = ~85M
+   depth 24:  [B][B][B][B][B][B][B][B][B][B][B][B]
+              [B][B][B][B][B][B][B][B][B][B][B][B]            = ~170M  (2x)
+   ```
 
 Everything else (`block_size`, `n_head`, `vocab`) has a much smaller effect on
 the total. Width and depth are the dials.
