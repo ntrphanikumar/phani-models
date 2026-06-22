@@ -7,6 +7,7 @@ import argparse
 import os
 
 import chess
+import chess.pgn
 import torch
 from torch.nn import functional as F
 
@@ -76,10 +77,23 @@ def play_game(model, tokenizer, config, max_moves=60, legal_mask=True, seed=0):
     return sans
 
 
+def to_pgn(sans):
+    """Replay SAN moves onto a board and produce PGN text (paste into lichess.org/paste)."""
+    board = chess.Board()
+    for san in sans:
+        board.push(board.parse_san(san))
+    game = chess.pgn.Game.from_board(board)  # adds headers + result tag
+    game.headers["Event"] = "Chess GPT self-play"
+    game.headers["White"] = "ChessGPT"
+    game.headers["Black"] = "ChessGPT"
+    return str(game)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate a game from the Chess GPT.")
     parser.add_argument("--max_moves", type=int, default=60)
     parser.add_argument("--no-legal-mask", action="store_true")
+    parser.add_argument("--pgn", action="store_true", help="output PGN (paste into lichess.org/paste)")
     parser.add_argument("--checkpoint", default=DEFAULT_CKPT)
     parser.add_argument("--tokenizer", default=DEFAULT_TOKENIZER)
     parser.add_argument("--seed", type=int, default=0)
@@ -91,7 +105,8 @@ def main():
     tokenizer = MoveTokenizer.load(args.tokenizer)
     ckpt = torch.load(args.checkpoint, map_location="cpu")
     config = Config(**ckpt["config"])
-    config.device = "cuda" if torch.cuda.is_available() else "cpu"
+    config.device = "cuda" if torch.cuda.is_available() else (
+        "mps" if torch.backends.mps.is_available() else "cpu")
 
     model = GPTLanguageModel(tokenizer.vocab_size, config).to(config.device)
     model.load_state_dict(ckpt["model_state"])
@@ -102,6 +117,10 @@ def main():
         legal_mask=not args.no_legal_mask,
         seed=args.seed,
     )
+
+    if args.pgn:
+        print(to_pgn(sans))
+        return
 
     # pretty print as 1. e4 e5 2. Nf3 ...
     out = []
